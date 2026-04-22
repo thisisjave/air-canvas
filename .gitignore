@@ -8,6 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
-
-
-*.md
+synopsis.md
+github_guide.md

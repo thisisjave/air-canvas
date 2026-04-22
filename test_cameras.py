@@ -1,30 +1,48 @@
+"""
+Camera Selector: Shows a live preview from each detected camera
+so you can visually identify which index matches which device.
+Press any key to move to the next camera. Press 'q' to quit.
+"""
 import cv2
 
-def test_cameras():
-    print("Searching for available cameras...")
-    indices = []
-    # Test first 5 indices (usually enough for most Mac setups)
-    for i in range(5):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret:
-                print(f"[SUCCESS] Index {i}: Camera is working.")
-                indices.append(i)
-            else:
-                print(f"[WARNING] Index {i}: Camera opened but failed to read frame.")
-            cap.release()
-        else:
-            print(f"[INFO] Index {i}: No camera found.")
-    
-    if indices:
-        print(f"\nAvailable Indices: {indices}")
-        print("\nTo use Continuity Camera (iPhone):")
-        print("1. Ensure iPhone is unlocked and nearby.")
-        print("2. Run this script again. The iPhone usually appears as index 1 or 2.")
-        print("3. Once you identify the index, update CAMERA_INDEX in drawing.py.")
-    else:
-        print("\nNo working cameras found. Please check your system permissions.")
+print("=== Camera Identification Tool ===\n")
 
-if __name__ == "__main__":
-    test_cameras()
+for i in range(5):
+    cap = cv2.VideoCapture(i)
+    if not cap.isOpened():
+        print(f"Index {i}: Not available")
+        cap.release()
+        continue
+    
+    # Read the camera's actual resolution
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    print(f"Index {i}: Active ({w}x{h}) — Showing preview...")
+    print("   Press any key to close this preview, 'q' to quit.\n")
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Label the frame so you can see which index you're looking at
+        cv2.putText(frame, f"Camera Index: {i} ({w}x{h})", (10, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        cv2.putText(frame, "Press any key for next, 'q' to quit", (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        cv2.imshow("Camera Preview", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key != 255:  # Any key pressed
+            if key == ord('q'):
+                cap.release()
+                cv2.destroyAllWindows()
+                print("Quit.")
+                exit()
+            break
+    
+    cap.release()
+    cv2.destroyAllWindows()
+
+print("\n=== Done. Update CAMERA_INDEX in drawing.py with your chosen index. ===")

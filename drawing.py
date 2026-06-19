@@ -19,17 +19,34 @@ Keyboard Controls:
 import cv2
 import numpy as np
 import time
+import os
+import datetime
 import mediapipe as mp
 from euro_filter import OneEuroFilter
+from hud_renderer import (
+    draw_toolbar,
+    draw_floating_status,
+    draw_stats_overlay,
+    draw_glass_rect,
+)
 
 # --- Configuration ---
 CAMERA_INDEX = 0  # 0 = iPhone (1920x1080) | 1 = MacBook (1280x720)
 MODEL_PATH = "hand_landmarker.task"
+SWAP_HANDS = True  # Set to True if your Left/Right hands are swapped
 
 cap = cv2.VideoCapture(CAMERA_INDEX)
 
-# Drawing Ink Color (BGR format)
-DRAW_COLOR = (0, 0, 255)  # Red ink
+# Drawing Ink Colors (BGR format)
+COLORS = [
+    (0, 0, 255),    # Red
+    (0, 255, 0),    # Green
+    (255, 0, 0),    # Blue
+    (0, 255, 255),  # Yellow
+    (255, 255, 255) # White
+]
+DRAW_COLOR = COLORS[0]  # Start with Red
+ERASER_MODE = False
 
 # --- MediaPipe Tasks API Setup ---
 BaseOptions = mp.tasks.BaseOptions
@@ -40,7 +57,7 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 options = HandLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=MODEL_PATH),
     running_mode=VisionRunningMode.VIDEO,
-    num_hands=1,
+    num_hands=2,
     min_hand_detection_confidence=0.7,
     min_hand_presence_confidence=0.7,
     min_tracking_confidence=0.7
@@ -49,25 +66,39 @@ options = HandLandmarkerOptions(
 landmarker = HandLandmarker.create_from_options(options)
 
 # --- 1 Euro Filter Setup (replaces Kalman + EMA) ---
-filter_x = OneEuroFilter(freq=30.0, min_cutoff=0.3, beta=0.02, d_cutoff=1.0)
-filter_y = OneEuroFilter(freq=30.0, min_cutoff=0.3, beta=0.02, d_cutoff=1.0)
+filter_x = OneEuroFilter(freq=30.0, min_cutoff=0.6, beta=0.05, d_cutoff=1.0)
+filter_y = OneEuroFilter(freq=30.0, min_cutoff=0.6, beta=0.05, d_cutoff=1.0)
 
 # --- Drawing State ---
 brush_thickness = 10
 undo_list = []
-max_undos = 10
+max_undos = 20
 stroke_active = False
+current_stroke = []  # List of (x, y) points for the active stroke
 prevPoint = None
 prev_time = 0
 imgCanvas = None
 frame_count = 0
 
+# --- Virtual Palette Setup ---
+header_height = 100
+# Cooldown for toggle actions (Save, Invert)
+last_action_time = 0
+cooldown_duration = 1.0 # seconds
+
 # Gesture state
 writing_active = False  # Start in hover mode
 gesture_text = "HOVERING"
 
+# HUD state — fingertip position for floating status pill
+right_fingertip: tuple | None = None
 
-def count_fingers_up(hand_landmarks, img_w, img_h):
+TOOL_NAMES  = ["RED", "GREEN", "BLUE", "YELLOW", "ERASER", "SAVE", "INVERT"]
+TOOL_COLORS = [(0,0,255),(0,255,0),(255,0,0),(0,255,255),(200,200,200),(100,100,100),(255,0,255)]
+hover_tool_idx = -1  # which palette button the left hand is hovering over
+
+
+def count_fingers_up(hand_landmarks, img_w, img_h, hand_type="Right"):
     """
     Determine which fingers are extended (up).
     Returns a list of booleans: [thumb, index, middle, ring, pinky]
@@ -79,10 +110,13 @@ def count_fingers_up(hand_landmarks, img_w, img_h):
     
     fingers = []
     
-    # Thumb: compare X position (works for right hand facing camera after flip)
+    # Thumb: compare X position (account for Left vs Right hand and flip)
     thumb_tip_x = hand_landmarks[tips[0]].x
     thumb_ip_x = hand_landmarks[pips[0]].x
-    fingers.append(thumb_tip_x < thumb_ip_x)  # After mirror flip
+    if hand_type == "Right":
+        fingers.append(thumb_tip_x < thumb_ip_x)
+    else:
+        fingers.append(thumb_tip_x > thumb_ip_x)
     
     # Other 4 fingers: tip above PIP = finger is up
     for i in range(1, 5):
@@ -90,7 +124,122 @@ def count_fingers_up(hand_landmarks, img_w, img_h):
         pip_y = hand_landmarks[pips[i]].y
         fingers.append(tip_y < pip_y)
     
-    return fingers
+    # Calculate distance between thumb and index unconditionally
+    tx, ty = hand_landmarks[4].x * img_w, hand_landmarks[4].y * img_h
+    ix, iy = hand_landmarks[8].x * img_w, hand_landmarks[8].y * img_h
+    dist = np.sqrt((tx - ix)**2 + (ty - iy)**2)
+
+    return fingers, dist
+
+
+def save_drawing(img):
+    """Save the current frame to the screenshots directory."""
+    if not os.path.exists("screenshots"):
+        os.makedirs("screenshots")
+    
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"screenshots/canvas_{timestamp}.png"
+    cv2.imwrite(filename, img)
+    print(f"Saved: {filename}")
+
+
+def recognize_shape(points):
+    """
+    Analyze a list of points to see if it approximates a circle, rectangle, triangle, ellipse, pentagon, hexagon, or line.
+    Returns (shape_type, params) or (None, None).
+    """
+    if len(points) < 8:  # Lowered limit to support fast/small drawings
+        return None, None
+    
+    # Convert points to numpy array
+    pts = np.array(points, dtype=np.int32)
+    
+    # --- 1. Straight Line Check ---
+    start_pt = pts[0]
+    end_pt = pts[-1]
+    line_dist = np.linalg.norm(start_pt - end_pt)
+    
+    # Compute total path length
+    diffs = np.diff(pts, axis=0)
+    total_dist = np.sum(np.sqrt(np.sum(diffs**2, axis=1)))
+    
+    if total_dist > 0 and (line_dist / total_dist) > 0.90:
+        return "LINE", (tuple(start_pt), tuple(end_pt))
+
+    # --- 2. Convex Hull & Preprocessing ---
+    hull = cv2.convexHull(pts)
+    hull_area = cv2.contourArea(hull)
+    hull_peri = cv2.arcLength(hull, True)
+    
+    # Lowered area limit to 100 to allow small shapes to be snapped
+    if hull_peri == 0 or hull_area < 100:
+        return None, None
+        
+    # Get rotated bounding rectangle (rotation-invariant)
+    rot_rect = cv2.minAreaRect(hull)
+    box_points = np.int32(cv2.boxPoints(rot_rect))
+    rw, rh = rot_rect[1]
+    rect_area = rw * rh
+    
+    # Get minimum enclosing circle
+    (cx, cy), radius = cv2.minEnclosingCircle(hull)
+    circle_area = np.pi * (radius ** 2)
+    
+    # Compute shape descriptors on the Convex Hull
+    circularity = 4 * np.pi * hull_area / (hull_peri ** 2)
+    rect_fill_ratio = hull_area / rect_area if rect_area > 0 else 0
+    circle_fill_ratio = hull_area / circle_area if circle_area > 0 else 0
+    
+    # --- 3. Circle Check ---
+    if circularity > 0.82 and circle_fill_ratio > 0.70:
+        return "CIRCLE", (int(cx), int(cy), int(radius))
+        
+    # --- 4. Rectangle Check ---
+    if rect_fill_ratio > 0.80:
+        return "RECTANGLE", box_points
+        
+    # --- 5. Ellipse / Oval Check ---
+    if len(pts) >= 5:
+        ellipse_box = cv2.fitEllipse(pts)
+        _, (ew, eh), _ = ellipse_box
+        ellipse_area = np.pi * (ew / 2) * (eh / 2)
+        ellipse_fill_ratio = hull_area / ellipse_area if ellipse_area > 0 else 0
+        
+        if ellipse_fill_ratio > 0.85 and circularity > 0.40:
+            return "ELLIPSE", ellipse_box
+            
+    # --- 6. Polygon Checks (Triangle, Pentagon, Hexagon) ---
+    approx = cv2.approxPolyDP(hull, 0.045 * hull_peri, True)
+    num_verts = len(approx)
+    
+    if num_verts == 3:
+        return "TRIANGLE", approx
+    elif num_verts == 5:
+        return "PENTAGON", approx
+    elif num_verts == 6:
+        return "HEXAGON", approx
+        
+    # Try alternative epsilons to see if we can cleanly resolve vertices
+    for eps_factor in [0.03, 0.05, 0.07, 0.09]:
+        approx_alt = cv2.approxPolyDP(hull, eps_factor * hull_peri, True)
+        n_verts_alt = len(approx_alt)
+        if n_verts_alt == 3:
+            return "TRIANGLE", approx_alt
+        elif n_verts_alt == 4:
+            if rect_fill_ratio > 0.65:
+                return "RECTANGLE", box_points
+        elif n_verts_alt == 5:
+            return "PENTAGON", approx_alt
+        elif n_verts_alt == 6:
+            return "HEXAGON", approx_alt
+
+    # Fallback/Borderline Case: 4 approximated vertices but low fill ratio is likely a triangle
+    if num_verts == 4 and rect_fill_ratio < 0.65:
+        approx_3 = cv2.approxPolyDP(hull, 0.08 * hull_peri, True)
+        if len(approx_3) == 3:
+            return "TRIANGLE", approx_3
+            
+    return None, None
 
 
 def draw_hand_landmarks(img, landmarks, iw, ih):
@@ -151,96 +300,247 @@ while True:
     hand_detected = False
     
     if result.hand_landmarks:
-        for hand_lms in result.hand_landmarks:
-            hand_detected = True
+        hand_detected = True
+        
+    # --- Antigravity HUD: Toolbar ---
+    hud_state = {
+        "header_height": header_height,
+        "tool_names":    TOOL_NAMES,
+        "tool_colors":   TOOL_COLORS,
+        "colors":        COLORS,
+        "draw_color":    DRAW_COLOR,
+        "eraser_mode":   ERASER_MODE,
+        "swap_hands":    SWAP_HANDS,
+        "hover_tool_idx": hover_tool_idx,
+    }
+    draw_toolbar(imgResult, hud_state, frame_count)
+
+    right_hand_this_frame = False
+    right_fingertip = None
+    hover_tool_idx = -1  # reset each frame; updated in Left hand block
+    
+    if hand_detected:
+        # Iterate through all detected hands
+        for idx, hand_lms in enumerate(result.hand_landmarks):
+            # Get handedness (Left vs Right)
+            hand_type = result.handedness[idx][0].category_name 
+            
+            # Swap logic if configuration is enabled
+            if SWAP_HANDS:
+                hand_type = "Right" if hand_type == "Left" else "Left"
             
             # Draw hand skeleton on live feed
             draw_hand_landmarks(imgResult, hand_lms, iw, ih)
             
-            # Get Index Finger Tip (Landmark 8)
-            raw_x = int(hand_lms[8].x * iw)
-            raw_y = int(hand_lms[8].y * ih)
-            
-            # Apply 1 Euro Filter for smooth tracking
-            t = time.time()
-            cx = int(filter_x.filter(raw_x, t))
-            cy = int(filter_y.filter(raw_y, t))
-            
-            # --- Gesture Detection ---
-            fingers = count_fingers_up(hand_lms, iw, ih)
-            index_up = fingers[1]
-            middle_up = fingers[2]
-            
-            # Gesture Logic:
-            # 1 finger (index only) = DRAWING
-            # 2 fingers (index + middle) = HOVERING
-            if index_up and not middle_up:
-                # DRAWING MODE
-                if not writing_active:
-                    # Just switched to drawing — reset filter and previous point
+            # --- Hand-Specific Logic ---
+            if hand_type == "Right":  # RIGHT HAND = DRAWING
+                right_hand_this_frame = True
+                # Get Index Finger Tip (Landmark 8)
+                raw_x = int(hand_lms[8].x * iw)
+                raw_y = int(hand_lms[8].y * ih)
+                
+                # Apply 1 Euro Filter for smooth tracking
+                t = time.time()
+                cx = int(filter_x.filter(raw_x, t))
+                cy = int(filter_y.filter(raw_y, t))
+                right_fingertip = (cx, cy)  # for floating status pill
+                
+                # --- Gesture Detection ---
+                fingers, _ = count_fingers_up(hand_lms, iw, ih, hand_type)
+                index_up = fingers[1]
+                pinky_up = fingers[4]
+                
+                # Right hand only handles drawing/hovering
+                if index_up and not pinky_up:
+                    # DRAWING MODE
+                    if not writing_active:
+                        prevPoint = None
+                        filter_x.reset()
+                        filter_y.reset()
+                        cx = int(filter_x.filter(raw_x, time.time()))
+                        cy = int(filter_y.filter(raw_y, time.time()))
+                        current_stroke = []
+                    
+                    writing_active = True
+                    gesture_text = "ERASING" if ERASER_MODE else "DRAWING"
+                    
+                    # Eraser is 2x larger for better usability
+                    current_thickness = brush_thickness * 2 if ERASER_MODE else brush_thickness
+                    
+                    cursor_color = (255, 255, 255) if ERASER_MODE else DRAW_COLOR
+                    cv2.circle(imgResult, (cx, cy), current_thickness + 5, cursor_color, cv2.FILLED)
+                    cv2.circle(imgResult, (cx, cy), current_thickness + 7, (0, 0, 0), 2)
+                    
+                    stroke_active = True
+                    
+                    if prevPoint is not None:
+                        d = np.linalg.norm(np.array([cx, cy]) - np.array(prevPoint))
+                        if 2 < d < 400:
+                            draw_color = (0, 0, 0) if ERASER_MODE else DRAW_COLOR
+                            cv2.line(imgCanvas, (prevPoint[0], prevPoint[1]), (cx, cy), draw_color, current_thickness, cv2.LINE_AA)
+                    
+                    current_stroke.append((cx, cy))
+                    prevPoint = [cx, cy]
+                    
+                elif index_up and pinky_up:
+                    # HOVERING MODE
+                    if writing_active and stroke_active:
+                        # Stroke just ended — Shape Recognition
+                        if not ERASER_MODE:
+                            shape_type, params = recognize_shape(current_stroke)
+                            if shape_type == "CIRCLE":
+                                cx_s, cy_s, r_s = params
+                                cv2.circle(imgCanvas, (cx_s, cy_s), r_s, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                            elif shape_type in ["RECTANGLE", "TRIANGLE", "PENTAGON", "HEXAGON"]:
+                                cv2.drawContours(imgCanvas, [params], 0, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                            elif shape_type == "LINE":
+                                p1, p2 = params
+                                cv2.line(imgCanvas, p1, p2, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                            elif shape_type == "ELLIPSE":
+                                cv2.ellipse(imgCanvas, params, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+
+                        undo_list.append(imgCanvas.copy())
+                        if len(undo_list) > max_undos + 1:
+                            undo_list.pop(0)
+                        stroke_active = False
+                        current_stroke = []
+                    
+                    writing_active = False
+                    gesture_text = "HOVERING"
                     prevPoint = None
-                    filter_x.reset()
-                    filter_y.reset()
-                    cx = int(filter_x.filter(raw_x, time.time()))
-                    cy = int(filter_y.filter(raw_y, time.time()))
-                writing_active = True
-                gesture_text = "DRAWING"
-                
-                # Show solid drawing cursor
-                cv2.circle(imgResult, (cx, cy), 15, DRAW_COLOR, cv2.FILLED)
-                
-                # Mark stroke as active for undo system
-                stroke_active = True
-                
-                if prevPoint is not None:
-                    dist = np.linalg.norm(np.array([cx, cy]) - np.array(prevPoint))
-                    if 2 < dist < 100:
-                        cv2.line(imgCanvas, (prevPoint[0], prevPoint[1]), (cx, cy), DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                prevPoint = [cx, cy]
-                
-            elif index_up and middle_up:
-                # HOVERING MODE
-                if writing_active and stroke_active:
-                    # Stroke just ended — take undo snapshot
-                    undo_list.append(imgCanvas.copy())
-                    if len(undo_list) > max_undos + 1:
-                        undo_list.pop(0)
-                    stroke_active = False
-                
-                writing_active = False
-                gesture_text = "HOVERING"
-                prevPoint = None
-                
-                # Show hover cursor (hollow yellow ring)
-                cv2.circle(imgResult, (cx, cy), 15, (255, 255, 0), 2)
-            
-            else:
-                # Other gestures — keep current state, show appropriate cursor
-                if writing_active:
-                    cv2.circle(imgResult, (cx, cy), 15, DRAW_COLOR, cv2.FILLED)
-                else:
                     cv2.circle(imgResult, (cx, cy), 15, (255, 255, 0), 2)
+                
+                else:
+                    # Other gestures
+                    if stroke_active:
+                        undo_list.append(imgCanvas.copy())
+                        if len(undo_list) > max_undos + 1:
+                            undo_list.pop(0)
+                        stroke_active = False
+                        current_stroke = []
+                    writing_active = False
+                    prevPoint = None
+                    cv2.circle(imgResult, (cx, cy), 15, (255, 255, 0), 2)
+
+            elif hand_type == "Left":  # LEFT HAND = SETTINGS
+                # Get landmarks
+                fingers, finger_dist = count_fingers_up(hand_lms, iw, ih, hand_type)
+                
+                lx = int(hand_lms[8].x * iw)
+                ly = int(hand_lms[8].y * ih)
+                
+                # Compute hover_tool_idx for toolbar highlight
+                if ly < header_height:
+                    hover_tool_idx = lx // (iw // len(TOOL_NAMES))
+
+                # 1. Dynamic Brush Sizing (Thumb-Index distance) & Locking Gesture
+                # Active when middle and ring are folded, and hand is below the toolbar
+                if not fingers[2] and not fingers[3] and ly >= header_height:
+                    if not fingers[4]:  # Pinky finger folded = ADJUSTING
+                        # Scale-invariant normalization using palm size (wrist landmark 0 to middle MCP landmark 9)
+                        wx, wy = hand_lms[0].x * iw, hand_lms[0].y * ih
+                        mx, my = hand_lms[9].x * iw, hand_lms[9].y * ih
+                        palm_dist = np.sqrt((wx - mx)**2 + (wy - my)**2)
+                        if palm_dist == 0:
+                            palm_dist = 1.0
+                        
+                        norm_dist = finger_dist / palm_dist
+                        # Map normalized distance (~0.2 to ~1.2) to brush thickness
+                        new_thickness = int(np.interp(norm_dist, [0.2, 1.2], [2, 50]))
+                        
+                        # Prevent jitter: only update if change is at least 1 pixel
+                        if abs(new_thickness - brush_thickness) >= 1:
+                            brush_thickness = new_thickness
+
+                        # Dynamic HUD Visual Feedback (Cyan for Adjusting)
+                        tx_p, ty_p = int(hand_lms[4].x * iw), int(hand_lms[4].y * ih)
+                        ix_p, iy_p = int(hand_lms[8].x * iw), int(hand_lms[8].y * ih)
+                        
+                        # Draw a connecting line between thumb tip and index tip
+                        cv2.line(imgResult, (tx_p, ty_p), (ix_p, iy_p), (0, 255, 255), 2, cv2.LINE_AA)
+                        cv2.circle(imgResult, (tx_p, ty_p), 6, (255, 0, 255), -1, cv2.LINE_AA)
+                        cv2.circle(imgResult, (ix_p, iy_p), 6, (255, 0, 255), -1, cv2.LINE_AA)
+                        
+                        # Size label next to index tip
+                        cv2.putText(imgResult, f"SIZE: {brush_thickness}", (ix_p + 15, iy_p), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2, cv2.LINE_AA)
+                    else:  # Pinky finger extended = LOCKED
+                        # Dynamic HUD Visual Feedback (Green for Locked)
+                        tx_p, ty_p = int(hand_lms[4].x * iw), int(hand_lms[4].y * ih)
+                        ix_p, iy_p = int(hand_lms[8].x * iw), int(hand_lms[8].y * ih)
+                        
+                        # Draw a thin green connecting line
+                        cv2.line(imgResult, (tx_p, ty_p), (ix_p, iy_p), (0, 200, 0), 1, cv2.LINE_AA)
+                        cv2.circle(imgResult, (tx_p, ty_p), 5, (0, 200, 0), -1, cv2.LINE_AA)
+                        cv2.circle(imgResult, (ix_p, iy_p), 5, (0, 200, 0), -1, cv2.LINE_AA)
+                        
+                        # Size label next to index tip
+                        cv2.putText(imgResult, f"SIZE: {brush_thickness} (LOCKED)", (ix_p + 15, iy_p), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 2, cv2.LINE_AA)
+                
+                # Visual feedback preview for brush size on left side (always visible when Left hand is present)
+                cv2.circle(imgResult, (50, ih-50), brush_thickness, DRAW_COLOR, -1)
+                cv2.putText(imgResult, f"SIZE: {brush_thickness}", (20, ih-110), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+                # 2. Tool Selection (Index finger over palette)
+                if fingers[1] and ly < header_height:
+                    num_tools_local = len(TOOL_NAMES)
+                    tool_idx = lx // (iw // num_tools_local)
+                    
+                    if tool_idx < 4: # Colors
+                        DRAW_COLOR = COLORS[tool_idx]
+                        ERASER_MODE = False
+                    elif tool_idx == 4: # Eraser
+                        ERASER_MODE = True
+                    elif tool_idx == 5: # Save
+                        if time.time() - last_action_time > cooldown_duration:
+                            save_drawing(imgResult)
+                            last_action_time = time.time()
+                    elif tool_idx == 6: # Invert Hand
+                        if time.time() - last_action_time > cooldown_duration:
+                            SWAP_HANDS = not SWAP_HANDS
+                            print(f"Handedness Swapped: {SWAP_HANDS}")
+                            last_action_time = time.time()
+                
+                # Left-hand controller cursor — magenta dot
+                cv2.circle(imgResult, (lx, ly), 8, (255, 0, 255), cv2.FILLED, cv2.LINE_AA)
+                cv2.circle(imgResult, (lx, ly), 10, (255, 255, 255), 1, cv2.LINE_AA)
     
-    if not hand_detected:
-        # Hand left the frame — end stroke if active
+    if not right_hand_this_frame:
+        # Right hand left the frame — end stroke if active
         if stroke_active:
+            if not ERASER_MODE:
+                shape_type, params = recognize_shape(current_stroke)
+                if shape_type == "CIRCLE":
+                    cx_s, cy_s, r_s = params
+                    cv2.circle(imgCanvas, (cx_s, cy_s), r_s, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                elif shape_type in ["RECTANGLE", "TRIANGLE", "PENTAGON", "HEXAGON"]:
+                    cv2.drawContours(imgCanvas, [params], 0, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                elif shape_type == "LINE":
+                    p1, p2 = params
+                    cv2.line(imgCanvas, p1, p2, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                elif shape_type == "ELLIPSE":
+                    cv2.ellipse(imgCanvas, params, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+
             undo_list.append(imgCanvas.copy())
             if len(undo_list) > max_undos + 1:
                 undo_list.pop(0)
             stroke_active = False
+            current_stroke = []
+
         prevPoint = None
         filter_x.reset()
         filter_y.reset()
     
-    # --- UI Overlay ---
-    cv2.putText(imgResult, f'FPS: {int(fps)}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-    cv2.putText(imgResult, f'Brush Size: {brush_thickness}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-    cv2.putText(imgResult, f'History: {len(undo_list)-1}', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-    
-    # Mode Status Indicator
-    mode_color = (0, 255, 0) if writing_active else (0, 0, 255)
-    cv2.putText(imgResult, f'[ {gesture_text} ]', (iw - 220, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
-    
+    # --- Antigravity HUD: Floating Status Pill ---
+    draw_floating_status(
+        imgResult, gesture_text, right_fingertip,
+        hand_visible=right_hand_this_frame, frame_count=frame_count)
+
+    # --- Antigravity HUD: Stats Overlay (bottom-left) ---
+    active_hand_label = "RIGHT" if not SWAP_HANDS else "SWAPPED"
+    draw_stats_overlay(imgResult, fps, brush_thickness, len(undo_list) - 1, active_hand_label)
+
     # --- Merge Canvas ---
     imgGray = cv2.cvtColor(imgCanvas, cv2.COLOR_BGR2GRAY)
     _, imgInv = cv2.threshold(imgGray, 1, 255, cv2.THRESH_BINARY_INV)
@@ -263,6 +563,8 @@ while True:
             undo_list.pop()
             imgCanvas = undo_list[-1].copy()
             prevPoint = None
+    elif key == ord('s'):
+        save_drawing(imgResult)
     elif key == 0 or key == 82:  # Up Arrow
         brush_thickness = min(brush_thickness + 2, 50)
     elif key == 1 or key == 84:  # Down Arrow

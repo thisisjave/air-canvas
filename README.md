@@ -1,67 +1,83 @@
-# GestureDraw: Advanced AI-Powered Air Canvas
+# Air Canvas Pro: Advanced AI-Powered Spatial Art Suite
 
-GestureDraw is a real-time, interactive drawing application that allows users to create digital art in 3D space using natural hand gestures. By leveraging Computer Vision and Deep Learning, the system tracks hand movements through a standard webcam and translates them into smooth, digital strokes.
+Air Canvas Pro is a professional-grade, real-time interactive drawing application that allows users to create digital art in 3D space using natural hand gestures. By leveraging state-of-the-art Computer Vision and Deep Learning, the system transforms your webcam into a boundless digital canvas.
 
-## Key Features
+## 🚀 Key Features
 
-*   **MediaPipe Hand Tracking**: Utilizes Google's Hand Landmark detection to track 21 distinct 3D points on the hand, providing high-fidelity tracking without the need for physical colored markers.
-*   **Gesture-Based Control**: Implements a natural user interface where specific finger orientations toggle between drawing and hovering modes, eliminating the need for constant keyboard interaction.
-*   **1 Euro Filter Smoothing**: Employs an industry-standard adaptive low-pass filter that dynamically adjusts smoothing based on movement speed. This eliminates hand tremors during slow drawing while maintaining responsiveness during fast strokes.
-*   **Anti-Aliased Rendering**: High-quality stroke rendering using sub-pixel anti-aliasing (LINE_AA) for professional-grade visual output.
-*   **Multi-Step Undo System**: Intelligent stroke-based history management allowing users to revert their last 10 actions.
-*   **Apple Continuity Camera Support**: Optimized for high-resolution input using iPhone as a wireless webcam on macOS.
-*   **Visual Performance Overlay**: Integrated heads-up display (HUD) showing real-time FPS, brush size, and system status.
+### 👐 Dual-Hand Interaction Model
+Experience a natural workstation workflow by separating creative and technical tasks:
+- **Right Hand (The Artist)**: Dedicated to high-precision drawing, hovering, and shape creation.
+- **Left Hand (The Controller)**: Manage your digital studio. Use your left hand to switch colors, adjust brush sizes, and trigger system actions without interrupting your right hand's creative flow.
 
-## Project Setup
+### 🎨 Premium Virtual UI (Glassmorphism)
+- **Modern HUD**: A sleek, semi-transparent heads-up display featuring rounded pill-shaped buttons.
+- **Visual Feedback**: Active tools and selected colors feature a "glow" highlight for instant orientation.
+- **Real-time Status**: Floating status indicators track your hand to show current modes (DRAWING, HOVERING, ERASING).
 
-This project utilizes the uv package manager for dependency isolation and performance.
+### 📐 Intelligent Shape Recognition
+The AI understands your intent. Draw a rough approximation of a **Circle**, **Rectangle**, or **Triangle**, and the system will automatically "snap" it to a perfect geometric shape when you lift your finger.
+
+### 📏 Dynamic Gesture-Based Sizing
+Adjust your brush thickness in real-time using natural spacing. Simply spread your **left thumb and index finger** apart to increase size, or bring them together to shrink it.
+
+### 🧠 Advanced Tracking & Smoothing
+- **MediaPipe Tasks API**: High-fidelity 21-point hand landmark tracking.
+- **1 Euro Filter**: Industry-standard adaptive smoothing that eliminates tremors while maintaining zero latency for fast movements.
+- **Sub-Pixel Anti-Aliasing**: Smooth, professional-grade strokes (LINE_AA).
+
+---
+
+## 🛠 Project Setup
+
+This project uses the `uv` package manager for high-performance dependency management.
 
 ```bash
-# Install dependencies
+# Clone the repository and install dependencies
 uv add opencv-python mediapipe numpy
 ```
 
-## How to Use
+### Hand Tracking Model
+Ensure `hand_landmarker.task` is present in the root directory. This is the pre-trained model required for the MediaPipe Tasks API.
 
-### 1. Camera Configuration
-Run the camera identification utility to select your preferred input device (e.g., MacBook FaceTime camera or iPhone):
-```bash
-uv run test_cameras.py
-```
-Update the `CAMERA_INDEX` constant in `drawing.py` if your preferred device is not the default (Index 0).
+---
 
-### 2. Execution
-Launch the main application:
-```bash
-uv run drawing.py
-```
+## 🎮 Controls and Gestures
 
-## Controls and Gestures
+### Hand Roles
+| Hand | Role | Primary Actions |
+| --- | --- | --- |
+| **Right Hand** | Artist | Drawing (1 finger), Hovering (2 fingers), Shape Creation |
+| **Left Hand** | Controller | Palette selection, Brush sizing (Thumb-Index dist), Invert Toggle |
 
-### Hand Gestures
-| Gesture | Action |
-| --- | --- |
-| 1 Finger Up (Index) | Drawing Mode: Strokes follow the fingertip |
-| 2 Fingers Up (Index + Middle) | Hovering Mode: Move the cursor without drawing |
+### Virtual Tool Palette (Top Bar)
+- **Colors**: RED, GREEN, BLUE, YELLOW.
+- **ERASER**: 2x thick brush to clear the canvas.
+- **SAVE**: Capture your artwork to the `screenshots/` folder.
+- **INVERT**: Instantly swap the roles of your Left and Right hands.
 
 ### Keyboard Shortcuts
 | Key | Action |
 | --- | --- |
-| z | Undo last stroke |
-| c | Clear entire canvas |
-| Up Arrow / w | Increase brush size |
-| Down Arrow / s | Decrease brush size |
-| q | Quit application |
+| **z** | Undo last stroke/shape |
+| **c** | Clear entire canvas |
+| **s** | Save drawing |
+| **q** | Quit application |
 
-## Project Structure
+---
 
-*   `drawing.py`: Main application core integrating MediaPipe tracking and canvas rendering.
-*   `euro_filter.py`: Implementation of the 1 Euro Filter algorithm for adaptive smoothing.
-*   `hand_landmarker.task`: Pre-trained deep learning model for hand landmark detection.
-*   `test_cameras.py`: Utility for identifying and previewing available camera devices.
-*   `synopsis.md`: Academic project documentation including flowcharts.
-*   `CHANGELOG.md`: Detailed history of project upgrades and technical milestones.
+## 📂 Project Structure
 
-## Technical Credits
-Built using OpenCV, MediaPipe, and NumPy.
-Developed as a project for [Your Institution/Purpose].
+- `drawing.py`: The heart of the application. Handles dual-hand logic, UI rendering, and gesture processing.
+- `euro_filter.py`: Implementation of the adaptive 1 Euro Filter for jitter-free tracking.
+- `test_cameras.py`: Utility to identify and preview available camera indices.
+- `hand_landmarker.task`: The deep learning model for hand tracking.
+- `screenshots/`: Automatically generated folder for your saved artwork.
+
+---
+
+## 🛠 Technical Credits
+Built with ❤️ using:
+- **OpenCV**: Image processing and UI rendering.
+- **MediaPipe**: Hand landmark detection and tracking.
+- **NumPy**: Mathematical operations and point processing.
+- **Python**: Core application logic.

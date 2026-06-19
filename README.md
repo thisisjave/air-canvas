@@ -25,14 +25,15 @@ The AI understands your intent. Draw a rough approximation of a shape, and the s
 - **Zero-Overlap Snapping**: Wipes out the rough hand-drawn trajectory when a shape is successfully detected, drawing only the clean shape on the canvas (no double/overlapping ink).
 
 ### 🔒 Left-Hand Pinky Size Lock
-- **Adjusting Mode (Pinky Folded)**: Keep your left middle and ring fingers folded, and keep your pinky folded. Pinch/spread your thumb and index to adjust brush size (HUD turns **cyan**).
-- **Locked Mode (Pinky Extended)**: Extend your pinky finger (middle and ring folded) to lock the size. The HUD turns **green** and displays `SIZE: X (LOCKED)`. The thickness is now frozen, allowing you to relax your hand without disturbing the selected size.
+- **Adjusting Mode (Pinky Extended)**: Keep your left middle and ring fingers folded, and extend your pinky finger. Pinch/spread your thumb and index to adjust brush size (HUD turns **cyan**).
+- **Locked Mode (Pinky Folded)**: Fold your left pinky finger (along with middle and ring fingers). The sizing locks at the current value (HUD turns **green** and displays `LOCKED`).
 
 ### 🧠 Advanced Tracking & Smoothing
 - **MediaPipe Tasks API**: High-fidelity 21-point hand landmark tracking.
 - **Tuned 1 Euro Filter**: Adaptive smoothing (`min_cutoff=0.6`, `beta=0.05`) designed to eliminate tremors while maintaining ultra-low latency for writing and drawing.
 - **Continuous Fast Strokes**: An increased distance connection threshold (`d < 400`) prevents lines from breaking during rapid writing or drawing movements.
 - **Sub-Pixel Anti-Aliasing**: Smooth, professional-grade strokes (LINE_AA).
+- **Spatial Handedness Filter**: Restricts settings adjustments to the left half of the screen (default settings side). If the drawing hand crosses the center line and is misclassified as the Left hand, the system automatically corrects its type to `Right` (drawing hand) on-the-fly, preventing accidental brush size changes.
 
 ---
 
@@ -62,8 +63,8 @@ Ensure `hand_landmarker.task` is present in the root directory. This is the pre-
 | **Left Hand** | Controller | Palette selection, Brush sizing (Thumb-Index dist), Pinky Lock, Invert Toggle |
 
 ### Left-Hand Brush Sizing & Lock
-* **Adjust (Pinky Folded)**: Middle + Ring folded, Pinky folded.
-* **Lock (Pinky Extended)**: Middle + Ring folded, Pinky extended.
+* **Adjust (Pinky Extended)**: Middle + Ring folded, Pinky extended.
+* **Lock (Pinky Folded)**: Middle + Ring folded, Pinky folded.
 
 ### Virtual Tool Palette (Top Bar)
 - **Colors**: RED, GREEN, BLUE, YELLOW.

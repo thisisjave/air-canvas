@@ -337,6 +337,14 @@ while True:
             # Swap logic if configuration is enabled
             if SWAP_HANDS:
                 hand_type = "Right" if hand_type == "Left" else "Left"
+                
+            # --- Spatial Hand Type Correction Filter ---
+            # Corrects handedness misclassifications based on screen position
+            wrist_x = hand_lms[0].x * iw
+            settings_on_left = True
+            if hand_type == "Left":
+                if (settings_on_left and wrist_x > iw * 0.5) or (not settings_on_left and wrist_x < iw * 0.5):
+                    hand_type = "Right"
             
             # Draw hand skeleton on live feed
             draw_hand_landmarks(imgResult, hand_lms, iw, ih)
@@ -450,7 +458,7 @@ while True:
                 # 1. Dynamic Brush Sizing (Thumb-Index distance) & Locking Gesture
                 # Active when middle and ring are folded, and hand is below the toolbar
                 if not fingers[2] and not fingers[3] and ly >= header_height:
-                    if not fingers[4]:  # Pinky finger folded = ADJUSTING
+                    if fingers[4]:  # Pinky finger extended = ADJUSTING
                         # Scale-invariant normalization using palm size (wrist landmark 0 to middle MCP landmark 9)
                         wx, wy = hand_lms[0].x * iw, hand_lms[0].y * ih
                         mx, my = hand_lms[9].x * iw, hand_lms[9].y * ih
@@ -478,7 +486,7 @@ while True:
                         # Size label next to index tip
                         cv2.putText(imgResult, f"SIZE: {brush_thickness}", (ix_p + 15, iy_p), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2, cv2.LINE_AA)
-                    else:  # Pinky finger extended = LOCKED
+                    else:  # Pinky finger folded = LOCKED
                         # Dynamic HUD Visual Feedback (Green for Locked)
                         tx_p, ty_p = int(hand_lms[4].x * iw), int(hand_lms[4].y * ih)
                         ix_p, iy_p = int(hand_lms[8].x * iw), int(hand_lms[8].y * ih)

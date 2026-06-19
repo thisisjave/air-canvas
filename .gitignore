@@ -25,7 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
+*.png
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -205,3 +205,36 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.DS_Store
+.gitignore
+AI Recognition Pipeline for-2026-05-15-150605.pdf
+AirCanvasPro_MajorProjectReport.docx
+drawing.py
+generate_report_extended.py
+generate_report.py
+hud_renderer.py
+InkInAir_MajorProjectReport.docx
+JITIN (200970772006).pdf
+README.md
+REPORTS/.DS_Store
+REPORTS/Aura-preface.pages
+REPORTS/Aura-report.pages
+REPORTS/JATIN-INK-IN-AIR.pdf
+REPORTS/JATIN-MP-FRONT.pdf
+REPORTS/JATIN-MP-PREFACE.docx
+REPORTS/JATIN-MP-PREFACE.pages
+REPORTS/aryan/.DS_Store
+REPORTS/aryan/Aryan_Train_ticket.pdf
+REPORTS/aryan/ARYAN-MP-FRONT.pdf
+REPORTS/aryan/Aryan-preface.pdf
+REPORTS/aryan/railway-reservation.docx
+REPORTS/aryan/SUPERVISER DECLARATION.pdf
+REPORTS/aryan/aryan ok report/Aura-preface.pdf
+REPORTS/aryan/aryan ok report/bajaj ok preface new.pdf
+REPORTS/aryan/aryan ok report/bajaj ok preface.docx
+REPORTS/aryan/aryan ok report/bajaj ok preface.pages
+REPORTS/aryan/aryan ok report/Chapters_merged (1)-1 (1).pages
+REPORTS/aryan/aryan ok report/JATIN-MP-PREFACE 2.pages
+REPORTS/aryan/aryan ok report/JATIN-MP-PREFACE.pages
+REPORTS/aryan/aryan ok report/SUPERVISER DECLARATION.pdf
+REPORTS/Jatin/.DS_Store

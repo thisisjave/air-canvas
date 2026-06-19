@@ -1,12 +1,12 @@
 """
-Air Canvas Pro Suite — Phase 2: MediaPipe Hand Tracking
-=======================================================
+Ink-in-Air Gesture Drawing System — Phase 2: MediaPipe Hand Tracking
+====================================================================
 Tracks your index finger using AI-powered hand landmark detection.
 No calibration, no pen, no environment dependency.
 
 Gesture Controls:
-  - 1 Finger Up (Index)            → DRAWING mode
-  - 2 Fingers Up (Index + Middle)  → HOVERING mode (move without drawing)
+  - Index Finger Only (Pinky Folded)  → DRAWING mode
+  - Index + Pinky Fingers Extended    → HOVERING mode (move without drawing)
 
 Keyboard Controls:
   - 'z'       → Undo last stroke
@@ -78,6 +78,7 @@ current_stroke = []  # List of (x, y) points for the active stroke
 prevPoint = None
 prev_time = 0
 imgCanvas = None
+imgCanvasPrev = None
 frame_count = 0
 
 # --- Virtual Palette Setup ---
@@ -148,7 +149,7 @@ def recognize_shape(points):
     Analyze a list of points to see if it approximates a circle, rectangle, triangle, ellipse, pentagon, hexagon, or line.
     Returns (shape_type, params) or (None, None).
     """
-    if len(points) < 8:  # Lowered limit to support fast/small drawings
+    if len(points) < 8:  # Lowered limit to support fast drawings
         return None, None
     
     # Convert points to numpy array
@@ -163,7 +164,8 @@ def recognize_shape(points):
     diffs = np.diff(pts, axis=0)
     total_dist = np.sum(np.sqrt(np.sum(diffs**2, axis=1)))
     
-    if total_dist > 0 and (line_dist / total_dist) > 0.90:
+    # Only snap to LINE if it's long enough (> 50px) and straight
+    if total_dist > 0 and (line_dist / total_dist) > 0.90 and line_dist > 50:
         return "LINE", (tuple(start_pt), tuple(end_pt))
 
     # --- 2. Convex Hull & Preprocessing ---
@@ -171,10 +173,17 @@ def recognize_shape(points):
     hull_area = cv2.contourArea(hull)
     hull_peri = cv2.arcLength(hull, True)
     
-    # Lowered area limit to 100 to allow small shapes to be snapped
-    if hull_peri == 0 or hull_area < 100:
+    # Reject shape snapping for small writing, dots, or details (hull_area < 350)
+    if hull_peri == 0 or hull_area < 350:
         return None, None
         
+    # --- 3. Closed Shape Guard ---
+    # For any closed shape (Circle, Rect, Ellipse, Polygons), the start and end of the stroke
+    # must be relatively close to form a closed loop. This prevents open letters (C, S, U, V, etc.) from snapping.
+    start_end_dist = np.linalg.norm(start_pt - end_pt)
+    if start_end_dist > 0.22 * hull_peri:
+        return None, None
+
     # Get rotated bounding rectangle (rotation-invariant)
     rot_rect = cv2.minAreaRect(hull)
     box_points = np.int32(cv2.boxPoints(rot_rect))
@@ -190,15 +199,15 @@ def recognize_shape(points):
     rect_fill_ratio = hull_area / rect_area if rect_area > 0 else 0
     circle_fill_ratio = hull_area / circle_area if circle_area > 0 else 0
     
-    # --- 3. Circle Check ---
+    # --- 4. Circle Check ---
     if circularity > 0.82 and circle_fill_ratio > 0.70:
         return "CIRCLE", (int(cx), int(cy), int(radius))
         
-    # --- 4. Rectangle Check ---
+    # --- 5. Rectangle Check ---
     if rect_fill_ratio > 0.80:
         return "RECTANGLE", box_points
         
-    # --- 5. Ellipse / Oval Check ---
+    # --- 6. Ellipse / Oval Check ---
     if len(pts) >= 5:
         ellipse_box = cv2.fitEllipse(pts)
         _, (ew, eh), _ = ellipse_box
@@ -208,7 +217,7 @@ def recognize_shape(points):
         if ellipse_fill_ratio > 0.85 and circularity > 0.40:
             return "ELLIPSE", ellipse_box
             
-    # --- 6. Polygon Checks (Triangle, Pentagon, Hexagon) ---
+    # --- 7. Polygon Checks (Triangle, Pentagon, Hexagon) ---
     approx = cv2.approxPolyDP(hull, 0.045 * hull_peri, True)
     num_verts = len(approx)
     
@@ -360,6 +369,7 @@ while True:
                         cx = int(filter_x.filter(raw_x, time.time()))
                         cy = int(filter_y.filter(raw_y, time.time()))
                         current_stroke = []
+                        imgCanvasPrev = imgCanvas.copy()
                     
                     writing_active = True
                     gesture_text = "ERASING" if ERASER_MODE else "DRAWING"
@@ -388,16 +398,20 @@ while True:
                         # Stroke just ended — Shape Recognition
                         if not ERASER_MODE:
                             shape_type, params = recognize_shape(current_stroke)
-                            if shape_type == "CIRCLE":
-                                cx_s, cy_s, r_s = params
-                                cv2.circle(imgCanvas, (cx_s, cy_s), r_s, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                            elif shape_type in ["RECTANGLE", "TRIANGLE", "PENTAGON", "HEXAGON"]:
-                                cv2.drawContours(imgCanvas, [params], 0, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                            elif shape_type == "LINE":
-                                p1, p2 = params
-                                cv2.line(imgCanvas, p1, p2, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                            elif shape_type == "ELLIPSE":
-                                cv2.ellipse(imgCanvas, params, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                            if shape_type is not None:
+                                if imgCanvasPrev is not None:
+                                    imgCanvas = imgCanvasPrev.copy()
+                                
+                                if shape_type == "CIRCLE":
+                                    cx_s, cy_s, r_s = params
+                                    cv2.circle(imgCanvas, (cx_s, cy_s), r_s, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                                elif shape_type in ["RECTANGLE", "TRIANGLE", "PENTAGON", "HEXAGON"]:
+                                    cv2.drawContours(imgCanvas, [params], 0, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                                elif shape_type == "LINE":
+                                    p1, p2 = params
+                                    cv2.line(imgCanvas, p1, p2, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                                elif shape_type == "ELLIPSE":
+                                    cv2.ellipse(imgCanvas, params, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
 
                         undo_list.append(imgCanvas.copy())
                         if len(undo_list) > max_undos + 1:
@@ -511,16 +525,20 @@ while True:
         if stroke_active:
             if not ERASER_MODE:
                 shape_type, params = recognize_shape(current_stroke)
-                if shape_type == "CIRCLE":
-                    cx_s, cy_s, r_s = params
-                    cv2.circle(imgCanvas, (cx_s, cy_s), r_s, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                elif shape_type in ["RECTANGLE", "TRIANGLE", "PENTAGON", "HEXAGON"]:
-                    cv2.drawContours(imgCanvas, [params], 0, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                elif shape_type == "LINE":
-                    p1, p2 = params
-                    cv2.line(imgCanvas, p1, p2, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
-                elif shape_type == "ELLIPSE":
-                    cv2.ellipse(imgCanvas, params, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                if shape_type is not None:
+                    if imgCanvasPrev is not None:
+                        imgCanvas = imgCanvasPrev.copy()
+                    
+                    if shape_type == "CIRCLE":
+                        cx_s, cy_s, r_s = params
+                        cv2.circle(imgCanvas, (cx_s, cy_s), r_s, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                    elif shape_type in ["RECTANGLE", "TRIANGLE", "PENTAGON", "HEXAGON"]:
+                        cv2.drawContours(imgCanvas, [params], 0, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                    elif shape_type == "LINE":
+                        p1, p2 = params
+                        cv2.line(imgCanvas, p1, p2, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
+                    elif shape_type == "ELLIPSE":
+                        cv2.ellipse(imgCanvas, params, DRAW_COLOR, brush_thickness, cv2.LINE_AA)
 
             undo_list.append(imgCanvas.copy())
             if len(undo_list) > max_undos + 1:
@@ -548,7 +566,7 @@ while True:
     imgResult = cv2.bitwise_and(imgResult, imgInv)
     imgResult = cv2.bitwise_or(imgResult, imgCanvas)
     
-    cv2.imshow("Air Canvas - Phase 2", imgResult)
+    cv2.imshow("Ink-in-Air Gesture Drawing System", imgResult)
     
     # --- Keyboard Controls ---
     key = cv2.waitKey(1) & 0xFF

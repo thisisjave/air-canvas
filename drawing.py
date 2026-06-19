@@ -10,7 +10,8 @@ Gesture Controls:
 
 Keyboard Controls:
   - 'z'       → Undo last stroke
-  - 'c'       → Clear canvas
+  - 'x'       → Redo last undone stroke
+  - 'c'       → Clear canvas (with swipe right restore backup)
   - 'q'       → Quit
   - Up/Down   → Increase/Decrease brush size
   - 'w'/'s'   → Increase/Decrease brush size (fallback)
@@ -28,6 +29,7 @@ from hud_renderer import (
     draw_floating_status,
     draw_stats_overlay,
     draw_glass_rect,
+    GLASS_BG,
 )
 
 # --- Configuration ---
@@ -72,6 +74,7 @@ filter_y = OneEuroFilter(freq=30.0, min_cutoff=0.6, beta=0.05, d_cutoff=1.0)
 # --- Drawing State ---
 brush_thickness = 10
 undo_list = []
+redo_list = []
 max_undos = 20
 stroke_active = False
 current_stroke = []  # List of (x, y) points for the active stroke
@@ -80,6 +83,13 @@ prev_time = 0
 imgCanvas = None
 imgCanvasPrev = None
 frame_count = 0
+left_hand_history = []
+last_swipe_time = 0
+swipe_cooldown = 1.0
+toast_message = None
+toast_timer = 0
+pre_clear_canvas = None
+pre_clear_undo_list = None
 
 # --- Virtual Palette Setup ---
 header_height = 100
@@ -135,6 +145,7 @@ def count_fingers_up(hand_landmarks, img_w, img_h, hand_type="Right"):
 
 def save_drawing(img):
     """Save the current frame to the screenshots directory."""
+    global toast_message, toast_timer
     if not os.path.exists("screenshots"):
         os.makedirs("screenshots")
     
@@ -142,6 +153,8 @@ def save_drawing(img):
     filename = f"screenshots/canvas_{timestamp}.png"
     cv2.imwrite(filename, img)
     print(f"Saved: {filename}")
+    toast_message = "CANVAS SAVED!"
+    toast_timer = time.time()
 
 
 def recognize_shape(points):
@@ -276,7 +289,7 @@ def draw_hand_landmarks(img, landmarks, iw, ih):
 print(f"Starting Camera {CAMERA_INDEX}...")
 print("Phase 2: MediaPipe Hand Tracking Active")
 print("Gestures: 1 Finger=Draw, 2 Fingers=Hover")
-print("Keys: 'z'=Undo, 'c'=Clear, 'q'=Quit, Up/Down=Brush Size")
+print("Keys: 'z'=Undo, 'x'=Redo, 'c'=Clear, 'q'=Quit, Up/Down=Brush Size")
 
 while True:
     success, img = cap.read()
@@ -424,6 +437,7 @@ while True:
                         undo_list.append(imgCanvas.copy())
                         if len(undo_list) > max_undos + 1:
                             undo_list.pop(0)
+                        redo_list.clear()
                         stroke_active = False
                         current_stroke = []
                     
@@ -438,6 +452,7 @@ while True:
                         undo_list.append(imgCanvas.copy())
                         if len(undo_list) > max_undos + 1:
                             undo_list.pop(0)
+                        redo_list.clear()
                         stroke_active = False
                         current_stroke = []
                     writing_active = False
@@ -450,6 +465,66 @@ while True:
                 
                 lx = int(hand_lms[8].x * iw)
                 ly = int(hand_lms[8].y * ih)
+                
+                # --- Swipe-to-Undo Tracking & Detection ---
+                current_time = time.time()
+                if len(left_hand_history) > 0:
+                    prev_t = left_hand_history[-1][2]
+                    if current_time - prev_t > 0.15:
+                        left_hand_history = []
+                
+                left_hand_history.append((lx, ly, current_time))
+                if len(left_hand_history) > 12:
+                    left_hand_history.pop(0)
+                
+                if len(left_hand_history) >= 2:
+                    x_end, y_end, t_end = left_hand_history[-1]
+                    for x_start, y_start, t_start in left_hand_history[:-1]:
+                        dt = t_end - t_start
+                        if dt <= 0.3:
+                            dx_left = x_start - x_end
+                            dx_right = x_end - x_start
+                            dy = abs(y_start - y_end)
+                            
+                            # 1. Swipe Left -> Clear Screen (with backup for restore)
+                            if dx_left > 0.15 * iw and dy < 0.60 * dx_left:
+                                if t_end - last_swipe_time > swipe_cooldown:
+                                    pre_clear_canvas = imgCanvas.copy()
+                                    pre_clear_undo_list = [state.copy() for state in undo_list]
+                                    imgCanvas = np.zeros_like(img)
+                                    undo_list = [imgCanvas.copy()]
+                                    redo_list.clear()
+                                    prevPoint = None
+                                    stroke_active = False
+                                    current_stroke = []
+                                    toast_message = "CANVAS CLEARED"
+                                    toast_timer = t_end
+                                    print("Gesture Clear Screen Triggered!")
+                                    last_swipe_time = t_end
+                                    left_hand_history = []
+                                    break
+                            
+                            # 2. Swipe Right -> Restore Cleared Canvas
+                            elif dx_right > 0.15 * iw and dy < 0.60 * dx_right:
+                                if t_end - last_swipe_time > swipe_cooldown:
+                                    if pre_clear_canvas is not None:
+                                        imgCanvas = pre_clear_canvas.copy()
+                                        undo_list = [state.copy() for state in pre_clear_undo_list]
+                                        pre_clear_canvas = None
+                                        pre_clear_undo_list = None
+                                        prevPoint = None
+                                        stroke_active = False
+                                        current_stroke = []
+                                        toast_message = "CANVAS RESTORED"
+                                        toast_timer = t_end
+                                        print("Gesture Canvas Restore Triggered!")
+                                    else:
+                                        toast_message = "NOTHING TO RESTORE"
+                                        toast_timer = t_end
+                                        print("Gesture Restore - Nothing to Restore!")
+                                    last_swipe_time = t_end
+                                    left_hand_history = []
+                                    break
                 
                 # Compute hover_tool_idx for toolbar highlight
                 if ly < header_height:
@@ -551,6 +626,7 @@ while True:
             undo_list.append(imgCanvas.copy())
             if len(undo_list) > max_undos + 1:
                 undo_list.pop(0)
+            redo_list.clear()
             stroke_active = False
             current_stroke = []
 
@@ -567,6 +643,59 @@ while True:
     active_hand_label = "RIGHT" if not SWAP_HANDS else "SWAPPED"
     draw_stats_overlay(imgResult, fps, brush_thickness, len(undo_list) - 1, active_hand_label)
 
+    # --- Antigravity HUD: HUD Toast Notifications ---
+    if toast_message is not None:
+        elapsed = time.time() - toast_timer
+        if elapsed < 1.5:
+            # Determine fade-out alpha
+            if elapsed > 1.0:
+                fade_alpha = (1.5 - elapsed) / 0.5
+            else:
+                fade_alpha = 1.0
+            
+            # Draw Toast centered horizontally at y=120 (just below header toolbar)
+            font = cv2.FONT_HERSHEY_DUPLEX
+            font_scale = 0.65
+            (tw, th), baseline = cv2.getTextSize(toast_message, font, font_scale, 2)
+            
+            pad_x = 24
+            pad_y = 14
+            w = tw + pad_x * 2
+            h = th + pad_y * 2
+            x = (iw - w) // 2
+            y = 120
+            
+            # Ensure ROI is fully within bounds
+            if x >= 0 and y >= 0 and x + w <= iw and y + h <= ih:
+                # ROI slice and copy
+                toast_roi = imgResult[y:y+h, x:x+w].copy()
+                
+                # Determine glow color
+                if "UNDO" in toast_message:
+                    glow_color = (0, 255, 255)      # Cyan for Undo
+                elif "REDO" in toast_message:
+                    glow_color = (255, 0, 255)      # Magenta for Redo
+                elif "CLEARED" in toast_message:
+                    glow_color = (0, 60, 255)       # Red for Clear Screen
+                elif "RESTORE" in toast_message:
+                    glow_color = (0, 165, 255)      # Amber/Orange for Restore
+                else:
+                    glow_color = (0, 200, 80)       # Green for Save
+                
+                # Render glass rect
+                draw_glass_rect(toast_roi, 0, 0, w, h, color=GLASS_BG, alpha=0.5, radius=12, glow_color=glow_color)
+                
+                # Render text
+                tx = (w - tw) // 2
+                ty = (h + th) // 2
+                cv2.putText(toast_roi, toast_message, (tx + 1, ty + 1), font, font_scale, (0, 0, 0), 2, cv2.LINE_AA)
+                cv2.putText(toast_roi, toast_message, (tx, ty), font, font_scale, glow_color, 2, cv2.LINE_AA)
+                
+                # Blend back
+                cv2.addWeighted(toast_roi, fade_alpha, imgResult[y:y+h, x:x+w], 1.0 - fade_alpha, 0, imgResult[y:y+h, x:x+w])
+        else:
+            toast_message = None
+
     # --- Merge Canvas ---
     imgGray = cv2.cvtColor(imgCanvas, cv2.COLOR_BGR2GRAY)
     _, imgInv = cv2.threshold(imgGray, 1, 255, cv2.THRESH_BINARY_INV)
@@ -581,14 +710,30 @@ while True:
     if key == ord('q'):
         break
     elif key == ord('c'):
+        pre_clear_canvas = imgCanvas.copy()
+        pre_clear_undo_list = [state.copy() for state in undo_list]
         imgCanvas = np.zeros_like(img)
         undo_list = [imgCanvas.copy()]
+        redo_list.clear()
         prevPoint = None
+        toast_message = "CANVAS CLEARED"
+        toast_timer = time.time()
     elif key == ord('z'):
         if len(undo_list) > 1:
-            undo_list.pop()
+            undone_state = undo_list.pop()
+            redo_list.append(undone_state)
             imgCanvas = undo_list[-1].copy()
             prevPoint = None
+            toast_message = "UNDO"
+            toast_timer = time.time()
+    elif key == ord('x'):
+        if len(redo_list) > 0:
+            undone_state = redo_list.pop()
+            undo_list.append(undone_state)
+            imgCanvas = undone_state.copy()
+            prevPoint = None
+            toast_message = "REDO"
+            toast_timer = time.time()
     elif key == ord('s'):
         save_drawing(imgResult)
     elif key == 0 or key == 82:  # Up Arrow

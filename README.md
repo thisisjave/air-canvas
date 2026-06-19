@@ -28,6 +28,17 @@ The AI understands your intent. Draw a rough approximation of a shape, and the s
 - **Adjusting Mode (Pinky Extended)**: Keep your left middle and ring fingers folded, and extend your pinky finger. Pinch/spread your thumb and index to adjust brush size (HUD turns **cyan**).
 - **Locked Mode (Pinky Folded)**: Fold your left pinky finger (along with middle and ring fingers). The sizing locks at the current value (HUD turns **green** and displays `LOCKED`).
 
+### ⏪ Spatial Gestures (Clear & Restore) & HUD Toasts
+- **Swipe Left to Clear**: A quick leftward swipe of the Left Hand (toward the outer edge of the screen) completely clears the canvas.
+- **Swipe Right to Restore**: Forgot to save or made a mistake? A quick rightward swipe of the Left Hand (toward the center/right of the screen) instantly restores the cleared canvas along with its entire undo history stack.
+- **Real-time Glassmorphic Toasts**: Glowing heads-up alerts flash at the top center of the screen during key events:
+  - Cyan `"UNDO"`
+  - Magenta `"REDO"`
+  - Red `"CANVAS CLEARED"`
+  - Amber `"CANVAS RESTORED"`
+  - Green `"CANVAS SAVED!"`
+  Toasts remain fully opaque for 1.0 second and then smoothly fade out.
+
 ### 🧠 Advanced Tracking & Smoothing
 - **MediaPipe Tasks API**: High-fidelity 21-point hand landmark tracking.
 - **Tuned 1 Euro Filter**: Adaptive smoothing (`min_cutoff=0.6`, `beta=0.05`) designed to eliminate tremors while maintaining ultra-low latency for writing and drawing.
@@ -60,7 +71,7 @@ Ensure `hand_landmarker.task` is present in the root directory. This is the pre-
 | Hand | Role | Primary Actions |
 | --- | --- | --- |
 | **Right Hand** | Artist | Drawing (Index up, Pinky folded), Hovering (Index + Pinky up), Shape Creation |
-| **Left Hand** | Controller | Palette selection, Brush sizing (Thumb-Index dist), Pinky Lock, Invert Toggle |
+| **Left Hand** | Controller | Palette selection, Brush sizing (Thumb-Index dist), Pinky Lock, Invert Toggle, Clear Canvas (Swipe Left), Restore Canvas (Swipe Right) |
 
 ### Left-Hand Brush Sizing & Lock
 * **Adjust (Pinky Extended)**: Middle + Ring folded, Pinky extended.
@@ -75,8 +86,9 @@ Ensure `hand_landmarker.task` is present in the root directory. This is the pre-
 ### Keyboard Shortcuts
 | Key | Action |
 | --- | --- |
-| **z** | Undo last stroke/shape |
-| **c** | Clear entire canvas |
+| **z** | Undo last stroke/shape (pop state to redo stack) |
+| **x** | Redo last undone stroke |
+| **c** | Clear entire canvas (with restore backup support) |
 | **s** | Save drawing |
 | **q** | Quit application |
 

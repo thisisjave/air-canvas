@@ -5,17 +5,22 @@ Ink-in-Air Gesture Drawing System is a professional-grade, real-time interactive
 ## 🚀 Key Features
 
 ### 👐 Dual-Hand Interaction Model
+
 Experience a natural workstation workflow by separating creative and technical tasks:
+
 - **Right Hand (The Artist)**: Point with only your index finger (pinky folded) to **Draw/Erase**. Extend both your index and pinky fingers (like the "rock on" sign) to **Hover** (move the cursor without drawing).
 - **Left Hand (The Controller)**: Manage your digital studio. Use your left hand to switch colors, adjust brush sizes, lock/unlock thickness, and trigger system actions without interrupting your right hand's creative flow.
 
 ### 🎨 Premium Virtual UI (Glassmorphism)
+
 - **Modern HUD**: A sleek, semi-transparent heads-up display featuring rounded pill-shaped buttons.
 - **Visual Feedback**: Active tools and selected colors feature a "glow" highlight for instant orientation.
 - **Real-time Status**: Floating status indicators track your hand to show current modes (DRAWING, HOVERING, ERASING).
 
 ### 📐 Multi-Shape & Polygon Snapping
+
 The AI understands your intent. Draw a rough approximation of a shape, and the system snaps it to clean geometry:
+
 - **Straight Lines**: Snaps any straight-ish line drawn between two points into a perfect straight line.
 - **Circles & Ellipses (Ovals)**: Snaps circular curves, or elongated shapes into mathematically fitted ellipses.
 - **Rotated Rectangles**: Snaps rectangles at any angle using rotated bounding boxes (`cv2.minAreaRect`).
@@ -25,21 +30,12 @@ The AI understands your intent. Draw a rough approximation of a shape, and the s
 - **Zero-Overlap Snapping**: Wipes out the rough hand-drawn trajectory when a shape is successfully detected, drawing only the clean shape on the canvas (no double/overlapping ink).
 
 ### 🔒 Left-Hand Pinky Size Lock
+
 - **Adjusting Mode (Pinky Extended)**: Keep your left middle and ring fingers folded, and extend your pinky finger. Pinch/spread your thumb and index to adjust brush size (HUD turns **cyan**).
 - **Locked Mode (Pinky Folded)**: Fold your left pinky finger (along with middle and ring fingers). The sizing locks at the current value (HUD turns **green** and displays `LOCKED`).
 
-### ⏪ Spatial Gestures (Clear & Restore) & HUD Toasts
-- **Swipe Left to Clear**: A quick leftward swipe of the Left Hand (toward the outer edge of the screen) completely clears the canvas.
-- **Swipe Right to Restore**: Forgot to save or made a mistake? A quick rightward swipe of the Left Hand (toward the center/right of the screen) instantly restores the cleared canvas along with its entire undo history stack.
-- **Real-time Glassmorphic Toasts**: Glowing heads-up alerts flash at the top center of the screen during key events:
-  - Cyan `"UNDO"`
-  - Magenta `"REDO"`
-  - Red `"CANVAS CLEARED"`
-  - Amber `"CANVAS RESTORED"`
-  - Green `"CANVAS SAVED!"`
-  Toasts remain fully opaque for 1.0 second and then smoothly fade out.
-
 ### 🧠 Advanced Tracking & Smoothing
+
 - **MediaPipe Tasks API**: High-fidelity 21-point hand landmark tracking.
 - **Tuned 1 Euro Filter**: Adaptive smoothing (`min_cutoff=0.6`, `beta=0.05`) designed to eliminate tremors while maintaining ultra-low latency for writing and drawing.
 - **Continuous Fast Strokes**: An increased distance connection threshold (`d < 400`) prevents lines from breaking during rapid writing or drawing movements.
@@ -61,6 +57,7 @@ uv run drawing.py
 ```
 
 ### Hand Tracking Model
+
 Ensure `hand_landmarker.task` is present in the root directory. This is the pre-trained model required for the MediaPipe Tasks API (download it from the [Google MediaPipe Tasks Model Repository](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task)).
 
 ---
@@ -68,29 +65,32 @@ Ensure `hand_landmarker.task` is present in the root directory. This is the pre-
 ## 🎮 Controls and Gestures
 
 ### Hand Roles
-| Hand | Role | Primary Actions |
-| --- | --- | --- |
-| **Right Hand** | Artist | Drawing (Index up, Pinky folded), Hovering (Index + Pinky up), Shape Creation |
-| **Left Hand** | Controller | Palette selection, Brush sizing (Thumb-Index dist), Pinky Lock, Invert Toggle, Clear Canvas (Swipe Left), Restore Canvas (Swipe Right) |
+
+| Hand           | Role       | Primary Actions                                                               |
+| -------------- | ---------- | ----------------------------------------------------------------------------- |
+| **Right Hand** | Artist     | Drawing (Index up, Pinky folded), Hovering (Index + Pinky up), Shape Creation |
+| **Left Hand**  | Controller | Palette selection, Brush sizing (Thumb-Index dist), Pinky Lock, Invert Toggle |
 
 ### Left-Hand Brush Sizing & Lock
-* **Adjust (Pinky Extended)**: Middle + Ring folded, Pinky extended.
-* **Lock (Pinky Folded)**: Middle + Ring folded, Pinky folded.
+
+- **Adjust (Pinky Extended)**: Middle + Ring folded, Pinky extended.
+- **Lock (Pinky Folded)**: Middle + Ring folded, Pinky folded.
 
 ### Virtual Tool Palette (Top Bar)
+
 - **Colors**: RED, GREEN, BLUE, YELLOW.
 - **ERASER**: 2x thick brush to clear the canvas.
 - **SAVE**: Capture your artwork to the `screenshots/` folder.
 - **INVERT**: Instantly swap the roles of your Left and Right hands (useful for left-handed artists).
 
 ### Keyboard Shortcuts
-| Key | Action |
-| --- | --- |
-| **z** | Undo last stroke/shape (pop state to redo stack) |
-| **x** | Redo last undone stroke |
-| **c** | Clear entire canvas (with restore backup support) |
-| **s** | Save drawing |
-| **q** | Quit application |
+
+| Key   | Action                 |
+| ----- | ---------------------- |
+| **z** | Undo last stroke/shape |
+| **c** | Clear entire canvas    |
+| **s** | Save drawing           |
+| **q** | Quit application       |
 
 ---
 
@@ -105,7 +105,9 @@ Ensure `hand_landmarker.task` is present in the root directory. This is the pre-
 ---
 
 ## 🛠 Technical Credits
-Built with ❤️ using:
+
+Built using:
+
 - **OpenCV**: Image processing and UI rendering.
 - **MediaPipe**: Hand landmark detection and tracking.
 - **NumPy**: Mathematical operations and point processing.
